@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# DuckDB database files
+databases/*.duckdb
+
+# Environment files
+.env
+
+# Backup files
+*.bak
+*.tmp
+*.swp
+
+# VSCode settings (optional, if you use it)
+.vscode/
+
+# Node modules (if frontend grows later)
+node_modules/
+
+# macOS folder metadata
+.DS_Store
+
+# Python virtual environments
+venv/
+.env/
