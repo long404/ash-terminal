@@ -1,3 +1,3 @@
-API_KEY = 'your_alpha_vantage_api_key_here'
-SYMBOLS = ['AAPL', 'TSLA', 'GOOGL']
+API_KEY = 'H2DOHSBNPLK08NMA'
+SYMBOLS = ['TQQQ', 'QQQ', 'SPY', 'DIA']
 DATABASE_DIR = '../databases'
