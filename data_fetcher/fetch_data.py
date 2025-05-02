@@ -150,7 +150,7 @@ def validate_year_month(str):
     
 def parse_config():
     parser = argparse.ArgumentParser(description="Download intraday data per symbol and store in the database.")
-    parser.add_argument("--symbol", default=config.NO_SYMBOL, help="Ticker symbol (e.g. AMZN), if empty will get the data for all symbols in the config.")
+    parser.add_argument("--symbol", help="Ticker symbol (e.g. AMZN), if empty will get the data for all symbols in the config.")
     parser.add_argument("--year", help="Year to fetch data for (e.g., 2024)")
     parser.add_argument("--month", help="Month to fetch data for (e.g., 2024-02)")
     parser.add_argument("--date", help="Day to fetch data for (e.g., 2024-02-23)")
@@ -171,7 +171,8 @@ if __name__ == "__main__":
         dates = [args.month]
     elif args.date:
         debug_and_exit("NOT IMPLEMENTED YET!")    
-    # debug_and_exit(f"dates {dates}")
+    
+    debug(f"dates {dates}")
     
     if not args.symbol:
         # fetch the data for the symbols defined in the config
