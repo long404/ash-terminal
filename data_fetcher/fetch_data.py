@@ -148,15 +148,18 @@ def validate_year_month(str):
     if year < 1950 or year > datetime.now().year or month > 12 or month < 1 or (year == datetime.now().year and month > datetime.now().month):
         raise ValueError(err)
     
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download intraday data per ticker and store in separate DuckDB files.")
+def parse_config():
+    parser = argparse.ArgumentParser(description="Download intraday data per symbol and store in the database.")
     parser.add_argument("symbol", default=config.NO_SYMBOL, help="Ticker symbol, e.g. TQQQ")
     parser.add_argument("--year", help="Year to fetch data for (e.g., 2024)")
     parser.add_argument("--month", help="Month to fetch data for (e.g., 2024-02)")
     parser.add_argument("--date", help="Day to fetch data for (e.g., 2024-02-23)")
     parser.add_argument("--interval", default="1min", help="Interval (e.g., 1min, 5min, 15min)")
-
-    args = parser.parse_args()
+    return parser.parse_args()
+    
+if __name__ == "__main__":
+    args = parse_config()
+    
     dates = []
     if args.year:
         validate_year(args.year)    
@@ -176,10 +179,8 @@ if __name__ == "__main__":
     if symbol == config.NO_SYMBOL:
         # fetch the data for the symbols defined in the config
         print(f"Fetching config symbols: {config.SYMBOLS}!")
-        exit(0)
         for symbol in config.SYMBOLS:
             fetch_symbol_data(symbol, dates)
     else:
         print(f"Fetching data for symbol: {symbol}!")
-        exit(0)
         fetch_symbol_data(symbol, dates, args.interval, db_file)
