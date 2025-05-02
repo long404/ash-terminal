@@ -4,16 +4,40 @@ import duckdb
 import pandas as pd
 from datetime import datetime, timedelta
 import time
-from config import BASE_URL, ALPHA_API_KEY, SYMBOLS, DATABASE_DIR, TABLE_NAME
+# from config import BASE_URL, ALPHA_API_KEY, SYMBOLS, DATABASE_DIR, TABLE_NAME, NO_SYMBOL
+import config
 
 def debug_and_exit(print_obj):
-    print(print_obj)
+    print(f"404: print_obj")
     raise SystemExit()
 
+def debug(print_obj):
+    print(f"404: print_obj")
+
+
+def fetch_symbol_data(symbol, dates, interval, db_file):
+    for date in dates:
+        debug(f"Fetching {symbol} {date}...")
+        try:
+            df = fetch_intraday(symbol, interval, date)
+        except Exception as e:
+            print(f"ERR: Failed to fetch data for {symbol} {date}!")
+            continue
+        if not df.empty:
+            print(df)
+            #df["timestamp"] = pd.to_datetime(df["time"])
+            #df = df.drop(columns=["time"])
+            store_to_duckdb(df, db_file)
+            debug(f"Stored {len(df)} records for {date}")
+        else:
+            debug_and_exit(f"Failed to fetch: {symbol}, {date}")
+        time.sleep(1)
+
+
 def update_all_symbols():
-    for symbol in SYMBOLS:
+    for symbol in config.SYMBOLS:
         data = fetch_symbol_data(symbol)
-        # Add parsing and insertion logic here
+        #TODO Add parsing and insertion logic here
         print(f"Fetched data for {symbol}")
 
 # TODO: merge update_db with this
@@ -28,11 +52,11 @@ def fetch_intraday(symbol, interval, month):
         "month": month,
         "outputsize": "full",
         "datatype": "json",
-        "apikey": ALPHA_API_KEY
+        "apikey": config.ALPHA_API_KEY
     }
     
     # Fetch the data
-    response = requests.get(BASE_URL, params=params)
+    response = requests.get(config.BASE_URL, params=params)
     data = response.json()
 
     # Extract time series data
@@ -60,7 +84,7 @@ def store_to_duckdb(df, db_file):
     try:
         con = duckdb.connect(db_file)
         con.execute(f"""
-            CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+            CREATE TABLE IF NOT EXISTS {config.TABLE_NAME} (
                 timestamp TIMESTAMP UNIQUE,
                 open DOUBLE,
                 high DOUBLE,
@@ -70,12 +94,12 @@ def store_to_duckdb(df, db_file):
             )
         """)
         con.register("df_temp", df)
-        con.execute(f"INSERT INTO {TABLE_NAME} SELECT * FROM df_temp")
+        con.execute(f"INSERT INTO {config.TABLE_NAME} SELECT * FROM df_temp")
         con.close()
     except Exception as e:
         print(f"Storing data went wrong: {e}")
 
-def get_slices_for_year(year):
+def get_dates_for_year(year):
     slices = []
     months = ["{:02}".format(m) for m in range(1, 13)]
     for i, month in enumerate(months):
@@ -84,30 +108,58 @@ def get_slices_for_year(year):
     #print(slices)
     return slices
 
+# Validate the year string is in the format 'YYYY' and is a valid year between 1950 and "now"
+def validate_year(str):
+    err = f"'year' must be a 4 digit year between 1950 and {datetime.now().year}, e.g. '2023'."
+    if len(str) != 4:
+        raise ValueError(err)
+    year = int(str)
+    # validate
+    if year < 1950 or year > datetime.now().year:
+        raise ValueError(err)
+
+# Validate the month string is in the format 'YYYY-MM' and is a valid year between 1950 and "now" and a valid month
+def validate_year_month(str):
+    err = f"'month' must be in the format 'yyyy-mm' and be a valid month between 1950-01 and {datetime.now().year}-{datetime.now().strftime('%m')}, e.g. '2023-07'."
+    if len(str) != 7 or str[4] != '-':
+        raise ValueError(err)
+    month = int(str[5:])
+    year = int(str[:4])
+    if year < 1950 or year > datetime.now().year or month > 12 or month < 1 or (year == datetime.now().year and month > datetime.now().month):
+        raise ValueError(err)
+    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download intraday data per ticker and store in separate DuckDB files.")
-    parser.add_argument("symbol", help="Ticker symbol, e.g. TQQQ")
-    parser.add_argument("year", help="Year to fetch data for (e.g., 2024)")
+    parser.add_argument("symbol", default=config.NO_SYMBOL, help="Ticker symbol, e.g. TQQQ")
+    parser.add_argument("--year", help="Year to fetch data for (e.g., 2024)")
+    parser.add_argument("--month", help="Month to fetch data for (e.g., 2024-02)")
+    parser.add_argument("--date", help="Day to fetch data for (e.g., 2024-02-23)")
     parser.add_argument("--interval", default="1min", help="Interval (e.g., 1min, 5min, 15min)")
+
     args = parser.parse_args()
+    dates = []
+    if args.year:
+        validate_year(args.year)    
+        # generate a list of yyyy-mm values as the AlphaVantage API uses months to extract historical data
+        dates = get_dates_for_year(args.year)
+    elif args.month:
+        validate_year_month(args.month)
+        # single month "list"
+        dates = [args.month]
+    elif args.date:
+        debug_and_exit("NOT IMPLEMENTED YET!")    
+    # debug_and_exit(f"dates {dates}")
 
     symbol = args.symbol.upper()
-    dates = get_slices_for_year(args.year)
-    db_file = f"{DATABASE_DIR}/{symbol}_intraday.duckdb"
-
-    for date in dates:
-        print(f"Fetching {symbol} {date}...")
-        try:
-            df = fetch_intraday(symbol, args.interval, date)
-        except Exception as e:
-            print(f"ERR: Failed to fetch data for {symbol} {date}!")
-            continue
-        if not df.empty:
-            print(df)
-            #df["timestamp"] = pd.to_datetime(df["time"])
-            #df = df.drop(columns=["time"])
-            store_to_duckdb(df, db_file)
-            print(f"Stored {len(df)} records for {date}")
-        else:
-            debug_and_exit(f"Failed to fetch: {symbol}, {date}")
-        time.sleep(1)
+    db_file = f"{config.DATABASE_DIR}/{symbol}_intraday.duckdb"
+    
+    if symbol == config.NO_SYMBOL:
+        # fetch the data for the symbols defined in the config
+        print(f"Fetching config symbols: {config.SYMBOLS}!")
+        exit(0)
+        for symbol in config.SYMBOLS:
+            fetch_symbol_data(symbol, dates)
+    else:
+        print(f"Fetching data for symbol: {symbol}!")
+        exit(0)
+        fetch_symbol_data(symbol, dates, args.interval, db_file)
