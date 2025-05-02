@@ -4,7 +4,6 @@ import duckdb
 import pandas as pd
 from datetime import datetime, timedelta
 import time
-# from config import BASE_URL, ALPHA_API_KEY, SYMBOLS, DATABASE_DIR, TABLE_NAME, NO_SYMBOL
 import config
 
 def debug_and_exit(print_obj):
@@ -13,7 +12,6 @@ def debug_and_exit(print_obj):
 
 def debug(print_obj):
     print(f"404: print_obj")
-
 
 def fetch_symbol_data(symbol, dates, interval, db_file):
     for date in dates:
