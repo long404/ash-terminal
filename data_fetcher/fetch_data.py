@@ -7,15 +7,36 @@ import time
 import config
 
 def debug_and_exit(print_obj):
-    print(f"404: print_obj")
-    raise SystemExit()
+    if config.DEBUG == 1:
+        print(f"404: {print_obj}")
+        raise SystemExit()
 
 def debug(print_obj):
-    print(f"404: print_obj")
+    if config.DEBUG == 1:
+        print(f"404: {print_obj}")
 
 def fetch_symbol_data(symbol, dates, interval, db_file):
+    if len(dates) == 0:
+        # fetch the last 100 datapoints
+        debug(f"Fetching LATEST {symbol} data...")
+        try:
+            df = fetch_intraday(symbol, interval, "")
+        except Exception as e:
+            print(f"ERR: Failed to fetch LATEST 100 datapoints for {symbol}!")
+            return
+        if not df.empty:
+            debug(df)
+            #df["timestamp"] = pd.to_datetime(df["time"])
+            #df = df.drop(columns=["time"])
+            store_to_duckdb(df, db_file)
+            debug(f"Stored LATEST {len(df)} records")
+        else:
+            debug_and_exit(f"Failed to fetch LATEST {symbol}")
+        time.sleep(1)
+        return
+
+    # fetch data for partucular month
     for date in dates:
-        debug(f"Fetching {symbol} {date}...")
         try:
             df = fetch_intraday(symbol, interval, date)
         except Exception as e:
@@ -38,18 +59,19 @@ def update_all_symbols():
         #TODO Add parsing and insertion logic here
         print(f"Fetched data for {symbol}")
 
-# TODO: merge update_db with this
+# Leave the month empty to get the latest 100 data points (e.g. minutes)
 def fetch_intraday(symbol, interval, month):
     print(f"Fetch for: {symbol}, {interval}, {month}")
     params = {
         "function": "TIME_SERIES_INTRADAY",
         "symbol": symbol,
         "interval": interval,
-        "adjusted": "true",
-        "extended_hours": "true",
-        "month": month,
-        "outputsize": "full",
-        "datatype": "json",
+        "adjusted": "true", # default is true 
+        "extended_hours": "true", # default is true
+        "month": month,  # YYYY-MM. If left EMPTY, the default is the last 100 datapoints (based on interval)
+        "entitlement": "delayed", # depends on the pay plan, if left empty data is from the previous day!
+        "outputsize": "full", # 'compact' (defualt) returns last 100 data points, 'full' returns last 30 days
+        "datatype": "json", # 'json (default) or 'csv'
         "apikey": config.ALPHA_API_KEY
     }
     
