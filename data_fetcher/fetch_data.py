@@ -103,6 +103,10 @@ def fetch_intraday(symbol, interval, month):
 def store_to_duckdb(df, db_file):
     try:
         con = duckdb.connect(db_file)
+    except Exception as e:
+        debug_and_exit(f"Failed to open the db [{db_file}]")
+
+    try:
         con.execute(f"""
             CREATE TABLE IF NOT EXISTS {config.TABLE_NAME} (
                 timestamp TIMESTAMP UNIQUE,
@@ -113,8 +117,14 @@ def store_to_duckdb(df, db_file):
                 volume BIGINT
             )
         """)
+    except Exception as e:
+        debug(f"Table {config.TABLE_NAME} already exists")
+
+    try:
+        # query the latest existing timestamp
+        last = f"(SELECT timestamp FROM {config.TABLE_NAME} ORDER BY timestamp DESC LIMIT 1)"
         con.register("df_temp", df)
-        con.execute(f"INSERT INTO {config.TABLE_NAME} SELECT * FROM df_temp")
+        con.execute(f"INSERT INTO {config.TABLE_NAME} SELECT * FROM df_temp WHERE timestamp > {last}")
         con.close()
     except Exception as e:
         print(f"Storing data went wrong: {e}")
