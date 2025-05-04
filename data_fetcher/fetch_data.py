@@ -40,8 +40,8 @@ def fetch_symbol_data(symbol, dates, interval, db_file):
             log.error(f"Failed to fetch LATEST 100 datapoints for {symbol}!")
             return
         if not df.empty:
-            store_to_duckdb(df, db_file)
-            log.info(f"Stored LATEST {len(df)} records")
+            new = store_to_duckdb(df, db_file)
+            log.info(f"Stored LATEST {new} new records")
         else:
             logcritical_and_exit(f"Failed to fetch LATEST {symbol}")
         time.sleep(1)
@@ -55,8 +55,8 @@ def fetch_symbol_data(symbol, dates, interval, db_file):
             log.error(f"Failed to fetch data for {symbol} {date}!")
             continue
         if not df.empty:
-            store_to_duckdb(df, db_file)
-            log.info(f"Stored {len(df)} records for {date}")
+            new = store_to_duckdb(df, db_file)
+            log.info(f"Stored {new} new records for {date}")
         else:
             logcritical_and_exit(f"Failed to fetch: {symbol}, {date}")
         time.sleep(1)
@@ -134,8 +134,13 @@ def store_to_duckdb(df, db_file):
         # query the latest existing timestamp
         last = f"(SELECT timestamp FROM {config.TABLE_NAME} ORDER BY timestamp DESC LIMIT 1)"
         con.register("df_temp", df)
-        con.execute(f"INSERT INTO {config.TABLE_NAME} SELECT * FROM df_temp WHERE timestamp > {last}")
+        new_records = con.execute(f"SELECT COUNT(*) FROM df_temp WHERE timestamp > {last}").fetchall()[0][0]
+        log.debug(f"New records in fetched data: {new_records}")
+        if new_records > 0:
+            con.execute(f"INSERT INTO {config.TABLE_NAME} SELECT * FROM df_temp WHERE timestamp > {last}")
         con.close()
+        return new_records
+        
     except Exception as e:
         log.error(f"Storing DB data went wrong: {e}")
 
