@@ -7,12 +7,11 @@ import time
 import config
 import sys
 import logging
-import inspect
 
 # setup logging
 log = logging.getLogger(f"ash-terminal")
 log_level = getattr(logging, config.LOG_LEVEL.upper(), logging.INFO)
-log_format = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+log_format = "%(asctime)s [%(levelname)s] [%(name)s] [%(funcName)s] %(message)s"
 if config.LOG_TO_FILE:
     logging.basicConfig(
         level=log_level,
@@ -37,13 +36,13 @@ def fetch_symbol_data(symbol, dates, interval, db_file):
         try:
             df = fetch_intraday(symbol, interval, "")
         except Exception as e:
-            log.error(f"Failed to fetch LATEST 100 datapoints for {symbol}!")
+            log.error(f"Failed to fetch LATEST 100 datapoints for {symbol}: {e}", exc_info=True)
             return
         if not df.empty:
             new = store_to_duckdb(df, db_file)
             log.info(f"Stored LATEST {new} new records")
         else:
-            logcritical_and_exit(f"Failed to fetch LATEST {symbol}")
+            log.warning(f"Got an empty result for the LATEST 100 datapoints for {symbol}")
         time.sleep(1)
         return
 
@@ -52,24 +51,17 @@ def fetch_symbol_data(symbol, dates, interval, db_file):
         try:
             df = fetch_intraday(symbol, interval, date)
         except Exception as e:
-            log.error(f"Failed to fetch data for {symbol} {date}!")
+            log.error(f"Failed to fetch data for {symbol} {date}: {e}", exc_info=True)
             continue
         if not df.empty:
             new = store_to_duckdb(df, db_file)
             log.info(f"Stored {new} new records for {date}")
         else:
-            logcritical_and_exit(f"Failed to fetch: {symbol}, {date}")
+            log.warning(f"Failed to fetch: {symbol} for {date}! Moving on with other dates...")
         time.sleep(1)
 
-
-def update_all_symbols():
-    for symbol in config.SYMBOLS:
-        data = fetch_symbol_data(symbol)
-        #TODO Add parsing and insertion logic here
-        log.info(f"Fetched data for these tickers: {symbol}")
-
 # Leave the month empty to get the latest 100 data points (e.g. minutes)
-def fetch_intraday(symbol, interval, month):
+def fetch_intraday(symbol, interval, month, retries=3, backoff=2):
     log.info(f"Fetch intraday data for: {symbol}, {interval}, {month}")
     params = {
         "function": "TIME_SERIES_INTRADAY",
@@ -84,31 +76,39 @@ def fetch_intraday(symbol, interval, month):
         "apikey": config.ALPHA_API_KEY
     }
     
-    # Fetch the data
-    response = requests.get(config.BASE_URL, params=params)
-    data = response.json()
+    #retry the API call with backoffs
+    for attempt in range(retries):
+        try:
+            # Fetch the data
+            response = requests.get(config.BASE_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
 
-    # Extract time series data
-    # The actual time series key varies: "Time Series (1min)", "Time Series (5min)", etc.
-    time_series_key = next((k for k in data.keys() if "Time Series" in k), None)
-    if not time_series_key:
-        err = f"Error fetching data: {data.get('Note') or data.get('Error Message') or data}"
-        log.debug(err)
-        raise Exception(err)
+            # Extract time series data
+            # The actual time series key varies: "Time Series (1min)", "Time Series (5min)", etc.
+            time_series_key = next((k for k in data.keys() if "Time Series" in k), None)
+            if not time_series_key:
+                err = f"Error fetching data: {data.get('Note') or data.get('Error Message') or data}"
+                log.debug(err)
+                raise ValueError(err)
 
-    # Convert to DataFrame
-    df = pd.DataFrame.from_dict(data[time_series_key], orient="index")
-    df.index.name = "timestamp"
-    df = df.rename(columns=lambda x: x.split('. ')[1])  # Clean up column names ("1. open" → "open")
+            # Convert to DataFrame
+            df = pd.DataFrame.from_dict(data[time_series_key], orient="index")
+            df.index.name = "timestamp"
+            df = df.rename(columns=lambda x: x.split('. ')[1])  # Clean up column names ("1. open" -> "open")
 
-    # Convert data types
-    df = df.reset_index()
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    for col in ["open", "high", "low", "close"]:
-        df[col] = pd.to_numeric(df[col])
-    df["volume"] = pd.to_numeric(df["volume"], downcast="integer")
-    log.debug(f"\n{df}")
-    return df
+            # Convert data types
+            df = df.reset_index()
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+            for col in ["open", "high", "low", "close"]:
+                df[col] = pd.to_numeric(df[col])
+            df["volume"] = pd.to_numeric(df["volume"], downcast="integer")
+            log.debug(f"\n{df}")
+            return df
+        except Exception as e:
+                log.warning(f"Attempt {attempt + 1}/{retries} failed for {symbol}: {e}", exc_info=True)
+                time.sleep(backoff ** attempt)
+    logcritical_and_exit(f"All retries failed for {symbol} ({month})")
 
 def store_to_duckdb(df, db_file):
     try:
@@ -142,7 +142,7 @@ def store_to_duckdb(df, db_file):
         return new_records
         
     except Exception as e:
-        log.error(f"Storing DB data went wrong: {e}")
+        log.error(f"Storing DB data went wrong: {e}", exc_info=True)
 
 def get_dates_for_year(year):
     slices = []
