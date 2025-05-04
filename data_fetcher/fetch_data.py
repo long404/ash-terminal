@@ -107,7 +107,7 @@ def fetch_intraday(symbol, interval, month):
     for col in ["open", "high", "low", "close"]:
         df[col] = pd.to_numeric(df[col])
     df["volume"] = pd.to_numeric(df["volume"], downcast="integer")
-    log.debug(f"{df}")
+    log.debug(f"\n{df}")
     return df
 
 def store_to_duckdb(df, db_file):
