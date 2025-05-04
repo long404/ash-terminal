@@ -25,11 +25,8 @@ def fetch_symbol_data(symbol, dates, interval, db_file):
             print(f"ERR: Failed to fetch LATEST 100 datapoints for {symbol}!")
             return
         if not df.empty:
-            debug(df)
-            #df["timestamp"] = pd.to_datetime(df["time"])
-            #df = df.drop(columns=["time"])
             store_to_duckdb(df, db_file)
-            debug(f"Stored LATEST {len(df)} records")
+            print(f"Stored LATEST {len(df)} records")
         else:
             debug_and_exit(f"Failed to fetch LATEST {symbol}")
         time.sleep(1)
@@ -43,9 +40,6 @@ def fetch_symbol_data(symbol, dates, interval, db_file):
             print(f"ERR: Failed to fetch data for {symbol} {date}!")
             continue
         if not df.empty:
-            print(df)
-            #df["timestamp"] = pd.to_datetime(df["time"])
-            #df = df.drop(columns=["time"])
             store_to_duckdb(df, db_file)
             debug(f"Stored {len(df)} records for {date}")
         else:
@@ -167,19 +161,21 @@ def parse_config():
     parser.add_argument("--interval", default="1min", help="Interval (e.g., 1min, 5min, 15min)")
     return parser.parse_args()
     
+    
 if __name__ == "__main__":
     args = parse_config()
 
     dates = []
     if args.year:
         validate_year(args.year)    
-        # generate a list of yyyy-mm values as the AlphaVantage API uses months to extract historical data
+        # generate a list of YYYY-MM values as the AlphaVantage API uses months to extract historical data
         dates = get_dates_for_year(args.year)
     elif args.month:
         validate_year_month(args.month)
-        # single month "list"
+        # fetch data for a specific/single month
         dates = [args.month]
     elif args.date:
+        # fetch data for a specific day
         debug_and_exit("NOT IMPLEMENTED YET!")    
     
     debug(f"dates {dates}")
