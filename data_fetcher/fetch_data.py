@@ -192,7 +192,7 @@ if __name__ == "__main__":
         dates = [args.month]
     elif args.date:
         # fetch data for a specific day
-        logcritical_and_exit("NOT IMPLEMENTED YET!")    
+        logcritical_and_exit("Fetching specific day data is NOT IMPLEMENTED YET!")    
     
     log.debug(f"Dates: {dates}")
     
