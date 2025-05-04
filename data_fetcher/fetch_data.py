@@ -7,9 +7,10 @@ import time
 import config
 import sys
 import logging
+import inspect
 
 # setup logging
-log = logging.getLogger(f"ash-terminal {__name__}") # __name__ helps determine the component within the codebase (e.g. 'fetch_data')
+log = logging.getLogger(f"ash-terminal")
 log_level = getattr(logging, config.LOG_LEVEL.upper(), logging.INFO)
 log_format = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
 if config.LOG_TO_FILE:
@@ -26,7 +27,7 @@ else:
     )
 
 def logcritical_and_exit(err):
-    log.critical(f"Failed to fetch LATEST {symbol}")
+    log.critical(err)
     sys.exit(-1)
 
 def fetch_symbol_data(symbol, dates, interval, db_file):
