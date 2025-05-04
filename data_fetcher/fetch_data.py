@@ -5,6 +5,24 @@ import pandas as pd
 from datetime import datetime, timedelta
 import time
 import config
+import logging
+
+# setup logging
+logger = logging.getLogger(f"ash-terminal:__name__") # __name__ helps determine the component within the codebase (e.g. 'fetch_data')
+log_level = getattr(logging, config.LOG_LEVEL.upper(), logging.INFO)
+log_format = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+if config.LOG_TO_FILE:
+    logging.basicConfig(
+        level=log_level,
+        format=log_format,
+        filename=config.LOG_FILE_PATH,
+        filemode='a'
+    )
+else:
+    logging.basicConfig(
+        level=log_level,
+        format=log_format
+    )
 
 def debug_and_exit(print_obj):
     if config.DEBUG == 1:
