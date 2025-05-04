@@ -5,10 +5,11 @@ import pandas as pd
 from datetime import datetime, timedelta
 import time
 import config
+import sys
 import logging
 
 # setup logging
-logger = logging.getLogger(f"ash-terminal:__name__") # __name__ helps determine the component within the codebase (e.g. 'fetch_data')
+log = logging.getLogger(f"ash-terminal {__name__}") # __name__ helps determine the component within the codebase (e.g. 'fetch_data')
 log_level = getattr(logging, config.LOG_LEVEL.upper(), logging.INFO)
 log_format = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
 if config.LOG_TO_FILE:
@@ -24,29 +25,24 @@ else:
         format=log_format
     )
 
-def debug_and_exit(print_obj):
-    if config.DEBUG == 1:
-        print(f"404: {print_obj}")
-        raise SystemExit()
-
-def debug(print_obj):
-    if config.DEBUG == 1:
-        print(f"404: {print_obj}")
+def logcritical_and_exit(err):
+    log.critical(f"Failed to fetch LATEST {symbol}")
+    sys.exit(-1)
 
 def fetch_symbol_data(symbol, dates, interval, db_file):
     if len(dates) == 0:
         # fetch the last 100 datapoints
-        debug(f"Fetching LATEST {symbol} data...")
+        log.info(f"Fetching LATEST {symbol} data...")
         try:
             df = fetch_intraday(symbol, interval, "")
         except Exception as e:
-            print(f"ERR: Failed to fetch LATEST 100 datapoints for {symbol}!")
+            log.error(f"Failed to fetch LATEST 100 datapoints for {symbol}!")
             return
         if not df.empty:
             store_to_duckdb(df, db_file)
-            print(f"Stored LATEST {len(df)} records")
+            log.info(f"Stored LATEST {len(df)} records")
         else:
-            debug_and_exit(f"Failed to fetch LATEST {symbol}")
+            logcritical_and_exit(f"Failed to fetch LATEST {symbol}")
         time.sleep(1)
         return
 
@@ -55,13 +51,13 @@ def fetch_symbol_data(symbol, dates, interval, db_file):
         try:
             df = fetch_intraday(symbol, interval, date)
         except Exception as e:
-            print(f"ERR: Failed to fetch data for {symbol} {date}!")
+            log.error(f"Failed to fetch data for {symbol} {date}!")
             continue
         if not df.empty:
             store_to_duckdb(df, db_file)
-            debug(f"Stored {len(df)} records for {date}")
+            log.info(f"Stored {len(df)} records for {date}")
         else:
-            debug_and_exit(f"Failed to fetch: {symbol}, {date}")
+            logcritical_and_exit(f"Failed to fetch: {symbol}, {date}")
         time.sleep(1)
 
 
@@ -69,11 +65,11 @@ def update_all_symbols():
     for symbol in config.SYMBOLS:
         data = fetch_symbol_data(symbol)
         #TODO Add parsing and insertion logic here
-        print(f"Fetched data for {symbol}")
+        log.info(f"Fetched data for these tickers: {symbol}")
 
 # Leave the month empty to get the latest 100 data points (e.g. minutes)
 def fetch_intraday(symbol, interval, month):
-    print(f"Fetch for: {symbol}, {interval}, {month}")
+    log.info(f"Fetch intraday data for: {symbol}, {interval}, {month}")
     params = {
         "function": "TIME_SERIES_INTRADAY",
         "symbol": symbol,
@@ -95,7 +91,9 @@ def fetch_intraday(symbol, interval, month):
     # The actual time series key varies: "Time Series (1min)", "Time Series (5min)", etc.
     time_series_key = next((k for k in data.keys() if "Time Series" in k), None)
     if not time_series_key:
-        raise Exception(f"Error fetching data: {data.get('Note') or data.get('Error Message') or data}")
+        err = f"Error fetching data: {data.get('Note') or data.get('Error Message') or data}"
+        log.debug(err)
+        raise Exception(err)
 
     # Convert to DataFrame
     df = pd.DataFrame.from_dict(data[time_series_key], orient="index")
@@ -108,15 +106,14 @@ def fetch_intraday(symbol, interval, month):
     for col in ["open", "high", "low", "close"]:
         df[col] = pd.to_numeric(df[col])
     df["volume"] = pd.to_numeric(df["volume"], downcast="integer")
-    print("============================================")
-    print(df)
+    log.debug(f"{df}")
     return df
 
 def store_to_duckdb(df, db_file):
     try:
         con = duckdb.connect(db_file)
     except Exception as e:
-        debug_and_exit(f"Failed to open the db [{db_file}]")
+        logcritical_and_exit(f"Failed to open the db [{db_file}]\n{e}")
 
     try:
         con.execute(f"""
@@ -130,7 +127,7 @@ def store_to_duckdb(df, db_file):
             )
         """)
     except Exception as e:
-        debug(f"Table {config.TABLE_NAME} already exists")
+        log.debug(f"Table {config.TABLE_NAME} already exists")
 
     try:
         # query the latest existing timestamp
@@ -139,7 +136,7 @@ def store_to_duckdb(df, db_file):
         con.execute(f"INSERT INTO {config.TABLE_NAME} SELECT * FROM df_temp WHERE timestamp > {last}")
         con.close()
     except Exception as e:
-        print(f"Storing data went wrong: {e}")
+        log.error(f"Storing DB data went wrong: {e}")
 
 def get_dates_for_year(year):
     slices = []
@@ -153,21 +150,21 @@ def get_dates_for_year(year):
 # Validate the year string is in the format 'YYYY' and is a valid year between 1950 and "now"
 def validate_year(str):
     err = f"'year' must be a 4 digit year between 1950 and {datetime.now().year}, e.g. '2023'."
-    if len(str) != 4:
-        raise ValueError(err)
     year = int(str)
-    # validate
-    if year < 1950 or year > datetime.now().year:
+    if len(str) != 4 or year < 1950 or year > datetime.now().year:
+        log.error(err)
         raise ValueError(err)
 
 # Validate the month string is in the format 'YYYY-MM' and is a valid year between 1950 and "now" and a valid month
 def validate_year_month(str):
-    err = f"'month' must be in the format 'yyyy-mm' and be a valid month between 1950-01 and {datetime.now().year}-{datetime.now().strftime('%m')}, e.g. '2023-07'."
+    err = f"'month' must be in the format 'YYYY-MM' and be a valid month between 1950-01 and {datetime.now().year}-{datetime.now().strftime('%m')}, e.g. '2023-07'."
     if len(str) != 7 or str[4] != '-':
+        log.error(err)
         raise ValueError(err)
     month = int(str[5:])
     year = int(str[:4])
     if year < 1950 or year > datetime.now().year or month > 12 or month < 1 or (year == datetime.now().year and month > datetime.now().month):
+        log.error(err)
         raise ValueError(err)
     
 def parse_config():
@@ -194,18 +191,18 @@ if __name__ == "__main__":
         dates = [args.month]
     elif args.date:
         # fetch data for a specific day
-        debug_and_exit("NOT IMPLEMENTED YET!")    
+        logcritical_and_exit("NOT IMPLEMENTED YET!")    
     
-    debug(f"dates {dates}")
+    log.debug(f"Dates: {dates}")
     
     if not args.symbol:
         # fetch the data for the symbols defined in the config
-        print(f"Fetching config symbols: {config.SYMBOLS}!")
+        log.info(f"Fetching config symbols: {config.SYMBOLS}!")
         for symbol in config.SYMBOLS:
             db_file = f"{config.DATABASE_DIR}/{symbol}_intraday.duckdb"
             fetch_symbol_data(symbol, dates, args.interval, db_file)
     else:
         symbol = args.symbol.upper()
         db_file = f"{config.DATABASE_DIR}/{symbol}_intraday.duckdb"
-        print(f"Fetching data for symbol: {symbol}!")
+        log.info(f"Fetching data for symbol: {symbol}!")
         fetch_symbol_data(symbol, dates, args.interval, db_file)
