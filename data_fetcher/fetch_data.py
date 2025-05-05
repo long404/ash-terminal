@@ -126,32 +126,48 @@ def store_to_duckdb(df, db_file):
     except Exception as e:
         logcritical_and_exit(f"Failed to open the db [{db_file}]: {e}")
 
-    try:
-        con.execute(f"""
-            CREATE TABLE IF NOT EXISTS {config.TABLE_NAME} (
-                timestamp TIMESTAMP UNIQUE,
-                open DOUBLE,
-                high DOUBLE,
-                low DOUBLE,
-                close DOUBLE,
-                volume BIGINT
-            )
-        """)
-    except Exception as e:
-        log.debug(f"Table {config.TABLE_NAME} already exists")
+    # check if the data table already exists
+    table_exists = con.execute(f"""
+        SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{config.TABLE_NAME}'
+    """).fetchone()[0] > 0
+
+    if not table_exists:
+        try:
+            con.execute(f"""
+                CREATE TABLE IF NOT EXISTS {config.TABLE_NAME} (
+                    timestamp TIMESTAMP UNIQUE,
+                    open DOUBLE,
+                    high DOUBLE,
+                    low DOUBLE,
+                    close DOUBLE,
+                    volume BIGINT
+                )
+            """)
+        except Exception as e:
+            log.error(f"Failed to create table {config.TABLE_NAME}")
 
     try:
-        # query the latest existing timestamp
-        last = f"(SELECT timestamp FROM {config.TABLE_NAME} ORDER BY timestamp DESC LIMIT 1)"
+        new_records = -1
         con.register("df_temp", df) # treat the dataframe as a sql db
-        new_records = con.execute(f"SELECT COUNT(*) FROM df_temp WHERE timestamp > {last}").fetchall()[0][0]
+
+        if not table_exists:
+            log.debug("Table was newly create. Insert ALL the data from the dataframe!")
+            new_records = len(df)
+            con.execute(f"INSERT INTO {config.TABLE_NAME} SELECT * FROM df_temp")
+        else:
+            log.debug("Table already exists. Insert ONLY the new data from the dataframe!")
+            # query the latest existing timestamp
+            last = f"(SELECT timestamp FROM {config.TABLE_NAME} ORDER BY timestamp DESC LIMIT 1)"    
+            new_records = con.execute(f"SELECT COUNT(*) FROM df_temp WHERE timestamp > {last}").fetchone()[0]
+            if new_records > 0:
+                con.execute(f"INSERT INTO {config.TABLE_NAME} SELECT * FROM df_temp WHERE timestamp > {last}")
+
         log.debug(f"New records in fetched data: {new_records}")
-        if new_records > 0:
-            con.execute(f"INSERT INTO {config.TABLE_NAME} SELECT * FROM df_temp WHERE timestamp > {last}")
         con.close()
         return new_records
     except Exception as e:
         log.error(f"Storing DB data went wrong: {e}", exc_info=True)
+
 
 # return a list of months ('YYYY-MM') for which to fetch the data
 def get_dates_for_year(year):
