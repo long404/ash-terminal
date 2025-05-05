@@ -24,7 +24,7 @@ def test_fetch_intraday_success(mock_get):
     df = fetch_intraday("AAPL", "5min", "")
     assert not df.empty
     assert "timestamp" in df.columns
-    assert "1. open" in df.columns
+    assert "open" in df.columns
 
 # Test retry logic on API failure
 @patch("fetch_data.requests.get")
@@ -56,6 +56,8 @@ def test_fetch_intraday_retry_on_failure(mock_get):
 # Test DuckDB insert and deduplication
 def test_store_to_duckdb_insert_and_dedup(tmp_path):
     db_file = tmp_path / "test.duckdb"
+    
+    # initial data
     df = pd.DataFrame({
         "timestamp": pd.to_datetime(["2024-01-01 09:30:00", "2024-01-01 09:35:00"]),
         "open": [100, 101],
@@ -65,12 +67,43 @@ def test_store_to_duckdb_insert_and_dedup(tmp_path):
         "volume": [10000, 11000]
     })
 
+    # old AND new records
+    df2 = pd.DataFrame({
+        "timestamp": pd.to_datetime(["2024-01-01 09:35:00", "2024-01-01 09:40:00"]),
+        "open": [100, 101],
+        "high": [101, 102],
+        "low": [99, 100],
+        "close": [100.5, 101.5],
+        "volume": [10000, 11000]
+    })
+
+    # only new records
+    df3 = pd.DataFrame({
+        "timestamp": pd.to_datetime(["2024-01-01 09:55:00", "2024-01-01 10:00:00"]),
+        "open": [100, 101],
+        "high": [101, 102],
+        "low": [99, 100],
+        "close": [100.5, 101.5],
+        "volume": [10000, 11000]
+    })
+
+    # insert in newly created DB/table
     inserted = store_to_duckdb(df.copy(), str(db_file))
     assert inserted == 2
 
-    # Try inserting the same data again
+    # Try inserting the same data again (all duplicates)
     inserted_again = store_to_duckdb(df.copy(), str(db_file))
     assert inserted_again == 0
+
+    #try with one existing and one new record in the dataframe (partial insert test)
+    inserted = store_to_duckdb(df2.copy(), str(db_file))
+    assert inserted == 1
+
+    # insert new records only
+    inserted = store_to_duckdb(df3.copy(), str(db_file))
+    assert inserted == 2
+
+
 
 # Integration test: fetch_symbol_data orchestrates calls
 @patch("fetch_data.fetch_intraday")
