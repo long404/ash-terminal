@@ -29,12 +29,13 @@ def logcritical_and_exit(err):
     log.critical(err)
     sys.exit(-1)
 
-def fetch_symbol_data(symbol, dates, interval, db_file):
+def fetch_symbol_data(symbol, dates, interval, db_file, latest='compact'):
     if len(dates) == 0:
-        # fetch the last 100 datapoints
-        log.info(f"Fetching LATEST {symbol} data...")
+        # fetch the latest datapoints
+        last_x = "30 days" if latest == 'full' else "100 datapoints"
+        log.info(f"Fetching LATEST {last_x} for {symbol}...")
         try:
-            df = fetch_intraday(symbol, interval, "")
+            df = fetch_intraday(symbol, interval, month="", outputsize=latest)
         except Exception as e:
             log.error(f"Failed to fetch LATEST 100 datapoints for {symbol}: {e}", exc_info=True)
             return
@@ -60,8 +61,14 @@ def fetch_symbol_data(symbol, dates, interval, db_file):
             log.warning(f"Failed to fetch: {symbol} for {date}! Moving on with other dates...")
         time.sleep(1)
 
-# Leave the month empty to get the latest 100 data points (e.g. minutes)
-def fetch_intraday(symbol, interval, month, retries=3, backoff=2):
+# Fetch intraday data for a specific ticker.
+# symbol: the symbol of the ticker we are fetching data for
+# interval: the interval of the intraday data points ('1min', '5min', '15min', '30min', '60min')
+# month: If not empty (''), speficies a specific month ('YYYY-MM') for which to get the data
+# outputsize: if month is not set (''), outputsize defines if we are to get the most recent 30 days ('full') or the last 100 datapoints ('compact')
+# retries: defines how many times to retry the API request if it fails or times out
+# backoff: prevents overthrottling by extending the sleeps between retries (if calls to the API fail). The sleep is (backoff ** retry) seconds
+def fetch_intraday(symbol, interval, month, outputsize='compact', retries=3, backoff=2):
     log.info(f"Fetch intraday data for: {symbol}, {interval}, {month}")
     params = {
         "function": "TIME_SERIES_INTRADAY",
@@ -71,8 +78,8 @@ def fetch_intraday(symbol, interval, month, retries=3, backoff=2):
         "extended_hours": "true", # default is true
         "month": month,  # YYYY-MM. If left EMPTY, the default is the last 100 datapoints (based on interval)
         "entitlement": "delayed", # depends on the pay plan, if left empty data is from the previous day!
-        "outputsize": "full", # 'compact' (defualt) returns last 100 data points, 'full' returns last 30 days
-        "datatype": "json", # 'json (default) or 'csv'
+        "outputsize": outputsize, # 'compact' (defualt) returns last 100 data points, 'full' returns the last 30 days
+        "datatype": "json", # data format is either 'json' (default) or 'csv'
         "apikey": config.ALPHA_API_KEY
     }
     
@@ -110,11 +117,14 @@ def fetch_intraday(symbol, interval, month, retries=3, backoff=2):
                 time.sleep(backoff ** attempt)
     logcritical_and_exit(f"All retries failed for {symbol} ({month})")
 
+# Stores a pandas dataframe with OHLCV data to the DB of a spefific ticker
+# df: data frame with the OHLCV data
+# dc_file: the database in which to store the data 
 def store_to_duckdb(df, db_file):
     try:
         con = duckdb.connect(db_file)
     except Exception as e:
-        logcritical_and_exit(f"Failed to open the db [{db_file}]\n{e}")
+        logcritical_and_exit(f"Failed to open the db [{db_file}]: {e}")
 
     try:
         con.execute(f"""
@@ -133,24 +143,23 @@ def store_to_duckdb(df, db_file):
     try:
         # query the latest existing timestamp
         last = f"(SELECT timestamp FROM {config.TABLE_NAME} ORDER BY timestamp DESC LIMIT 1)"
-        con.register("df_temp", df)
+        con.register("df_temp", df) # treat the dataframe as a sql db
         new_records = con.execute(f"SELECT COUNT(*) FROM df_temp WHERE timestamp > {last}").fetchall()[0][0]
         log.debug(f"New records in fetched data: {new_records}")
         if new_records > 0:
             con.execute(f"INSERT INTO {config.TABLE_NAME} SELECT * FROM df_temp WHERE timestamp > {last}")
         con.close()
         return new_records
-        
     except Exception as e:
         log.error(f"Storing DB data went wrong: {e}", exc_info=True)
 
+# return a list of months ('YYYY-MM') for which to fetch the data
 def get_dates_for_year(year):
     slices = []
     months = ["{:02}".format(m) for m in range(1, 13)]
     for i, month in enumerate(months):
         slices.append(f"{year}-{month}")
-    #print(f"Slices for year {year}: ")
-    #print(slices)
+    log.debug(f"Slices for year {year}: {slices}")
     return slices
 
 # Validate the year string is in the format 'YYYY' and is a valid year between 1950 and "now"
