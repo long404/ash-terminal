@@ -29,15 +29,15 @@ def logcritical_and_exit(err):
     log.critical(err)
     sys.exit(-1)
 
-def fetch_symbol_data(symbol, dates, interval, db_file, latest='compact'):
-    if len(dates) == 0:
+def fetch_symbol_data(symbol, months, interval, db_file, outputsize='full'):
+    if len(months) == 0:
         # fetch the latest datapoints
-        last_x = "30 days" if latest == 'full' else "100 datapoints"
+        last_x = "30 days" if outputsize == 'full' else "100 datapoints"
         log.info(f"Fetching LATEST {last_x} for {symbol}...")
         try:
-            df = fetch_intraday(symbol, interval, month="", outputsize=latest)
+            df = fetch_intraday(symbol, interval, month='', outputsize=outputsize)
         except Exception as e:
-            log.error(f"Failed to fetch LATEST 100 datapoints for {symbol}: {e}", exc_info=True)
+            log.error(f"Failed to fetch LATEST {last_x} for {symbol}: {e}", exc_info=True)
             return
         if not df.empty:
             new = store_to_duckdb(df, db_file)
@@ -48,24 +48,24 @@ def fetch_symbol_data(symbol, dates, interval, db_file, latest='compact'):
         return
 
     # fetch data for partucular month
-    for date in dates:
+    for month in months:
         try:
-            df = fetch_intraday(symbol, interval, date)
+            df = fetch_intraday(symbol, interval, month=month, outputsize=outputsize)
         except Exception as e:
-            log.error(f"Failed to fetch data for {symbol} {date}: {e}", exc_info=True)
+            log.error(f"Failed to fetch data for {symbol} {month}: {e}", exc_info=True)
             continue
         if not df.empty:
             new = store_to_duckdb(df, db_file)
-            log.info(f"Stored {new} new records for {date}")
+            log.info(f"Stored {new} new records for {month}")
         else:
-            log.warning(f"Failed to fetch: {symbol} for {date}! Moving on with other dates...")
+            log.warning(f"Got empty dataset for: {symbol}, {month}! Moving on with other dates...")
         time.sleep(1)
 
 # Fetch intraday data for a specific ticker.
 # symbol: the symbol of the ticker we are fetching data for
 # interval: the interval of the intraday data points ('1min', '5min', '15min', '30min', '60min')
-# month: If not empty (''), speficies a specific month ('YYYY-MM') for which to get the data
-# outputsize: if month is not set (''), outputsize defines if we are to get the most recent 30 days ('full') or the last 100 datapoints ('compact')
+# month: Speficies a specific month ('YYYY-MM') for which to get the data. If empty (''), get the latest data based on outpoutsize (see below)
+# outputsize: defines if we are to get 30 days ('full') or the last 100 datapoints ('compact').
 # retries: defines how many times to retry the API request if it fails or times out
 # backoff: prevents overthrottling by extending the sleeps between retries (if calls to the API fail). The sleep is (backoff ** retry) seconds
 def fetch_intraday(symbol, interval, month, outputsize='compact', retries=3, backoff=2):
@@ -96,7 +96,7 @@ def fetch_intraday(symbol, interval, month, outputsize='compact', retries=3, bac
             time_series_key = next((k for k in data.keys() if "Time Series" in k), None)
             if not time_series_key:
                 err = f"Error fetching data: {data.get('Note') or data.get('Error Message') or data}"
-                log.debug(err)
+                log.error(err)
                 raise ValueError(err)
 
             # Convert to DataFrame
@@ -203,7 +203,6 @@ def parse_config():
     parser.add_argument("--symbol", help="Ticker symbol (e.g. AMZN), if empty will get the data for all symbols in the config.")
     parser.add_argument("--year", help="Year to fetch data for (e.g., 2024)")
     parser.add_argument("--month", help="Month to fetch data for (e.g., 2024-02)")
-    parser.add_argument("--date", help="Day to fetch data for (e.g., 2024-02-23)")
     parser.add_argument("--interval", default="1min", help="Interval (e.g., 1min, 5min, 15min)")
     return parser.parse_args()
     
@@ -220,9 +219,6 @@ if __name__ == "__main__":
         validate_year_month(args.month)
         # fetch data for a specific/single month
         dates = [args.month]
-    elif args.date:
-        # fetch data for a specific day
-        logcritical_and_exit("Fetching specific day data is NOT IMPLEMENTED YET!")    
     
     log.debug(f"Dates: {dates}")
     
