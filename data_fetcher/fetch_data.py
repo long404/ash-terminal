@@ -9,7 +9,7 @@ import sys
 import logging
 
 # setup logging
-log = logging.getLogger(f"ash-terminal")
+log = logging.getLogger(f"ash-fetcher")
 log_level = getattr(logging, config.LOG_LEVEL.upper(), logging.INFO)
 log_format = "%(asctime)s [%(levelname)s] [%(name)s] [%(funcName)s] %(message)s"
 if config.LOG_TO_FILE:
